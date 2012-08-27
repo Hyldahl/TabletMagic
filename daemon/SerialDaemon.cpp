@@ -2199,11 +2199,167 @@ void WacomTablet::PostNXEvent(int eventType, SInt16 eventSubType, UInt8 otherBut
 	if (!tablet_on)
 		return;
 
-	static NXEventData eventData;
-
 #if LOG_STREAM_TO_FILE
 	if (logfile) fprintf(logfile, " | PostNXEvent(%d, %d, %02X)", eventType, eventSubType, otherButton);
 #endif
+    
+    CGEventRef move1 = CGEventCreateMouseEvent(
+                                               NULL, eventType,
+                                               CGPointMake(stylus.point.x, stylus.point.y),
+                                               kCGMouseButtonLeft // This parameter is ignored unless the mouseType parameter is kCGEventOtherMouseDown, kCGEventOtherMouseDragged, or kCGEventOtherMouseUp.
+                                               );
+    
+    switch (eventSubType) {
+        case NX_SUBTYPE_TABLET_POINT:
+            CGEventSetIntegerValueField(move1, kCGMouseEventSubtype, kCGEventMouseSubtypeTabletPoint);
+            break;
+        case NX_SUBTYPE_TABLET_PROXIMITY:
+            CGEventSetIntegerValueField(move1, kCGMouseEventSubtype, kCGEventMouseSubtypeTabletProximity);
+            break;
+    }
+    
+	switch (eventType) {
+        
+		case NX_OMOUSEUP:
+		case NX_OMOUSEDOWN:           
+             CGEventSetIntegerValueField(move1, kCGMouseEventSubtype, kCGEventMouseSubtypeTabletPoint);
+             CGEventSetIntegerValueField(move1, kCGMouseEventClickState, 0);
+             CGEventSetIntegerValueField(move1, kCGMouseEventButtonNumber, otherButton);
+            
+#if LOG_STREAM_TO_FILE
+			if (logfile) fprintf(logfile, " (other button)");
+#endif
+			break;
+        
+		case NX_LMOUSEUP:
+		case NX_LMOUSEDOWN:
+		case NX_RMOUSEUP:
+		case NX_RMOUSEDOWN:
+//			if (!no_tablet_events) {
+//				fprintf(output, "[POST] Button Event %d\n", eventType);
+                        
+            CGEventSetIntegerValueField(move1, kCGMouseEventSubtype, eventSubType);
+            CGEventSetDoubleValueField(move1, kCGMouseEventPressure, (double)stylus.pressure / (double)PRESSURE_SCALE);
+            
+#if LOG_STREAM_TO_FILE
+			if (logfile) fprintf(logfile, " | UP/DOWN | pressure=%u", stylus.pressure);
+#endif
+            
+             CGEventSetIntegerValueField(move1, kCGMouseEventNumber, 1); /* unique identifier for this button */
+             CGEventSetIntegerValueField(move1, kCGMouseEventClickState, 0); /* click state of this event */
+             CGEventSetIntegerValueField(move1, kCGMouseEventButtonNumber, 1); /* button generating other button event (0-31) */
+            
+            break;
+            
+		case NX_MOUSEMOVED:
+		case NX_LMOUSEDRAGGED:
+		case NX_RMOUSEDRAGGED:
+
+			// Relative motion is needed for the mouseMove event
+			if (stylus.oldPos.x == SHRT_MIN) {
+                CGEventSetIntegerValueField(move1, kCGMouseEventDeltaX, 0);
+                CGEventSetIntegerValueField(move1, kCGMouseEventDeltaY, 0);
+			}
+			else {
+                CGEventSetIntegerValueField(move1, kCGMouseEventDeltaX, (SInt32)(stylus.scrPos.x - stylus.oldPos.x));
+                CGEventSetIntegerValueField(move1, kCGMouseEventDeltaY, (SInt32)(stylus.scrPos.y - stylus.oldPos.y));
+			}
+            
+			stylus.oldPos = stylus.scrPos;
+            
+#if LOG_STREAM_TO_FILE
+			if (logfile) fprintf(logfile, " | delta=(%d,%d)", (SInt32)(stylus.scrPos.x - stylus.oldPos.x), (SInt32)(stylus.scrPos.y - stylus.oldPos.y));
+#endif
+            
+            break;
+    }
+    
+    CGEventSetDoubleValueField(move1, kCGMouseEventPressure, (double)stylus.pressure / (double)PRESSURE_SCALE);
+    CGEventSetDoubleValueField(move1, kCGTabletEventPointPressure, (double)stylus.pressure / (double)PRESSURE_SCALE);
+    
+	switch (eventType) {
+                       
+		case NX_LMOUSEUP:
+		case NX_LMOUSEDOWN:
+		case NX_RMOUSEUP:
+		case NX_RMOUSEDOWN:
+            
+		case NX_MOUSEMOVED:
+		case NX_LMOUSEDRAGGED:
+		case NX_RMOUSEDRAGGED:
+            
+            switch (eventSubType) {
+                case NX_SUBTYPE_TABLET_POINT:
+                    CGEventSetIntegerValueField(move1, kCGMouseEventSubtype, kCGEventMouseSubtypeTabletPoint);
+                    CGEventSetIntegerValueField(move1, kCGTabletEventPointX, stylus.point.x);
+                    CGEventSetIntegerValueField(move1, kCGTabletEventPointY, stylus.point.y);
+                    CGEventSetIntegerValueField(move1, kCGTabletEventPointButtons, 0x0000);
+                    CGEventSetDoubleValueField(move1, kCGTabletEventPointPressure, (double)stylus.pressure / (double)PRESSURE_SCALE);
+                    CGEventSetDoubleValueField(move1, kCGTabletEventTiltX, stylus.tilt.x);
+                    CGEventSetDoubleValueField(move1, kCGTabletEventTiltY, stylus.tilt.y);
+                    CGEventSetIntegerValueField(move1, kCGTabletEventDeviceID, stylus.proximity.deviceID);
+                    CGEventSetIntegerValueField(move1, kCGTabletEventPointZ, 0);
+                    CGEventSetDoubleValueField(move1, kCGTabletEventRotation, 0);
+                    CGEventSetDoubleValueField(move1, kCGTabletEventTangentialPressure, 0);
+                    
+                    
+#if LOG_STREAM_TO_FILE
+                    if (logfile) fprintf(logfile, " | MOVE | pressure=%u | point=(%d,%d) | tilt=(%d,%d)", stylus.pressure, stylus.point.x, stylus.point.y, stylus.tilt.x, stylus.tilt.y);
+#endif
+                    
+                    break;
+                    
+                case NX_SUBTYPE_TABLET_PROXIMITY:
+                    CGEventSetIntegerValueField(move1, kCGMouseEventSubtype, kCGEventMouseSubtypeTabletProximity);
+                    
+                    CGEventSetIntegerValueField(move1, kCGTabletProximityEventVendorID, stylus.proximity.vendorID);
+                    CGEventSetIntegerValueField(move1, kCGTabletProximityEventTabletID, stylus.proximity.tabletID);
+                    CGEventSetIntegerValueField(move1, kCGTabletProximityEventTabletID, stylus.proximity.tabletID);
+                    CGEventSetIntegerValueField(move1, kCGTabletProximityEventDeviceID, stylus.proximity.deviceID);
+                    CGEventSetIntegerValueField(move1, kCGTabletProximityEventSystemTabletID, stylus.proximity.systemTabletID);
+                    CGEventSetIntegerValueField(move1, kCGTabletProximityEventVendorPointerType, stylus.proximity.vendorPointerType);
+                    CGEventSetIntegerValueField(move1, kCGTabletProximityEventVendorPointerSerialNumber, stylus.proximity.pointerSerialNumber);
+                    CGEventSetIntegerValueField(move1, kCGTabletProximityEventVendorUniqueID, stylus.proximity.uniqueID);
+                    CGEventSetIntegerValueField(move1, kCGTabletProximityEventCapabilityMask, stylus.proximity.capabilityMask);
+                    CGEventSetIntegerValueField(move1, kCGTabletProximityEventPointerType, stylus.proximity.pointerType);
+                    CGEventSetIntegerValueField(move1, kCGTabletProximityEventEnterProximity, 1);
+                    
+#if LOG_STREAM_TO_FILE
+                    if (logfile) fprintf(logfile, " | PROXIMITY");
+#endif
+                    break;
+            }
+            
+            break;
+    }
+    
+	// Generate the tablet event to the system event driver
+    CGEventPost(kCGHIDEventTap, move1);
+    
+    #if LOG_STREAM_TO_FILE
+    if (logfile) fprintf(logfile, " | xy=(%.2f,%.2f)", stylus.scrPos.x, stylus.scrPos.y);
+    #endif
+   
+    //	if (!no_tablet_events) {
+    //
+    // Some apps only expect proximity events to arrive as pure tablet events (Desktastic, for one).
+    // Generate a pure tablet form of all proximity events as well.
+    //
+    if (eventSubType == NX_SUBTYPE_TABLET_PROXIMITY) {
+    //			fprintf(output, "[POST] Proximity Event %d Subtype %d\n", NX_TABLETPROXIMITY, NX_SUBTYPE_TABLET_PROXIMITY);
+        CGEventSetType(move1, kCGEventTabletProximity);
+        CGEventPost(kCGHIDEventTap, move1);
+    }
+    //	}
+
+    CFRelease(move1);
+    return;
+    
+    /************************************************************************************************************************/
+    /************************************************************************************************************************/
+    /************************************************************************************************************************/
+    
+	static NXEventData eventData;
 
 	switch (eventType) {
 		case NX_OMOUSEUP:
